@@ -1,14 +1,15 @@
 from ultralytics import YOLO
 import cv2
 import numpy as np
-from time import time
 import torch
 import os
+import time
+import threading
 from detection.sort import Sort
 
 class DroneDetector:
     def __init__(self, model_path=None, video_path=None, confidence=0.4, 
-                 horizontal_fov=62.2, vertical_fov=48.8):
+                 horizontal_fov=62.2, vertical_fov=48.8, headless=False):
         if model_path is None:
             # Always resolve relative to this file's directory
             model_path = os.path.join(os.path.dirname(__file__), "weights", "weightsM50Epoch.pt")
@@ -16,6 +17,7 @@ class DroneDetector:
             # Always resolve relative to this file's directory
             video_path = os.path.join(os.path.dirname(__file__), "assets", "videos", "drone_video.mp4")
         self.window_title = "Drone Detection (MPS)"
+        self.headless = headless
         self.video_path = video_path
         
         # Field of view parameters (for angle calculation)
@@ -44,30 +46,60 @@ class DroneDetector:
         # Track color map (for consistent colors per ID)
         self.track_colors = {}
         
-    def start(self):
-        # Open video file
-        self.video_capture = cv2.VideoCapture(self.video_path)
-        if not self.video_capture.isOpened():
-            print(f"Error: Unable to open video file {self.video_path}")
-            return
+        # Store current angles for access by other threads
+        self.current_angles = (0.0, 0.0, 0.0)  # (rotX, rotY, rotZ)
         
-        # Get video properties
-        frame_width = int(self.video_capture.get(cv2.CAP_PROP_FRAME_WIDTH))
-        frame_height = int(self.video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        total_frames = int(self.video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps = self.video_capture.get(cv2.CAP_PROP_FPS)
+        # Thread control
+        self._running = False
+        self._thread = None
+        
+    def start(self):
+        """Start the detector in a separate thread"""
+        if self._thread and self._thread.is_alive():
+            print("Detector already running")
+            return
+            
+        self._running = True
+        self._thread = threading.Thread(target=self._process_video)
+        self._thread.daemon = True  # Thread will exit when main program exits
+        self._thread.start()
+        print("Drone detector started in background thread")
+    
+    def _process_video(self):
+        """Process video frames in a separate thread"""
+        try:
+            # Open video file
+            self.video_capture = cv2.VideoCapture(self.video_path)
+            if not self.video_capture.isOpened():
+                print(f"Error: Unable to open video file {self.video_path}")
+                return
+            
+            # Get video properties
+            frame_width = int(self.video_capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+            frame_height = int(self.video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            total_frames = int(self.video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = self.video_capture.get(cv2.CAP_PROP_FPS)
+        except Exception as e:
+            print(f"Error initializing video capture: {e}")
+            return
         
         print(f"Video properties: {frame_width}x{frame_height}, {fps} FPS, {total_frames} frames")
         
         try:
-            cv2.namedWindow(self.window_title, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(self.window_title, frame_width, frame_height)
+            # Only create windows if not in headless mode
+            if not self.headless:
+                try:
+                    cv2.namedWindow(self.window_title, cv2.WINDOW_NORMAL)
+                    cv2.resizeWindow(self.window_title, frame_width, frame_height)
+                except cv2.error as e:
+                    print(f"Warning: Could not create OpenCV window: {e}")
+                    self.headless = True  # Switch to headless mode if window creation fails
             
-            self.fps_start_time = time()
+            self.fps_start_time = time.time()
             
             while True:
                 # Read frame
-                start_time = time()
+                start_time = time.time()
                 ret_val, frame = self.video_capture.read()
                 if not ret_val:
                     print("End of video or failed to read frame")
@@ -125,6 +157,10 @@ class DroneDetector:
                         h_angle, v_angle = self.calculate_angles(box_center_x, box_center_y, 
                                                                 frame_width, frame_height)
                         
+                        # Update current_angles property with the latest values (use horizontal as Y rotation)
+                        # X rotation is vertical angle (pitch), Y rotation is horizontal angle (yaw), Z rotation stays at 0
+                        self.current_angles = (v_angle, h_angle, 0.0)
+                        
                         # Assign a consistent color for this track ID
                         if track_id not in self.track_colors:
                             self.track_colors[track_id] = (np.random.randint(0, 255),
@@ -144,7 +180,7 @@ class DroneDetector:
                 
                 # --- FPS Calculation ---
                 self.frame_count += 1
-                elapsed_time = time() - self.fps_start_time
+                elapsed_time = time.time() - self.fps_start_time
                 if elapsed_time > 1:  # Update FPS every second
                     self.fps = self.frame_count / elapsed_time
                     self.fps_values.append(self.fps)
@@ -152,14 +188,14 @@ class DroneDetector:
                     if len(self.fps_values) > self.fps_buffer_size:
                         self.fps_values.pop(0)
                     self.frame_count = 0
-                    self.fps_start_time = time()
+                    self.fps_start_time = time.time()
                 
                 # Calculate statistics
                 avg_fps = sum(self.fps_values) / len(self.fps_values) if self.fps_values else 0
                 max_fps = max(self.fps_values) if self.fps_values else 0
                 
                 # Add performance metrics overlay
-                frame_time = (time() - start_time) * 1000  # Convert to milliseconds
+                frame_time = (time.time() - start_time) * 1000  # Convert to milliseconds
                 
                 # Setup text parameters
                 font = cv2.FONT_HERSHEY_SIMPLEX
@@ -178,16 +214,36 @@ class DroneDetector:
                 cv2.putText(plotted_frame, f"Device: {self.device}", 
                            (10, 120), font, font_scale, font_color, font_thickness, line_type)
                 
-                # Display the frame
-                cv2.imshow(self.window_title, plotted_frame)
+                # Display the frame only if not in headless mode
+                if not self.headless:
+                    try:
+                        cv2.imshow(self.window_title, plotted_frame)
+                    except cv2.error:
+                        # If display fails, switch to headless mode
+                        self.headless = True
                 
-                # Check for exit key
-                keyCode = cv2.waitKey(1) & 0xFF
-                if keyCode == 27 or keyCode == ord('q'):  # Esc or q key
+                # Check for exit key and thread status
+                if not self.headless:
+                    keyCode = cv2.waitKey(1) & 0xFF
+                    if keyCode == 27 or keyCode == ord('q') or not self._running:  # Esc or q key or thread stop signal
+                        break
+                elif not self._running:  # Just check running status in headless mode
                     break
+                    
+                # Add small sleep in headless mode to prevent CPU hogging
+                if self.headless:
+                    time.sleep(0.01)
                 
+        except Exception as e:
+            print(f"Error in video processing: {e}")
         finally:
-            self.stop()
+            # Clean up resources but don't call self.stop() which would attempt to join the current thread
+            if hasattr(self, 'video_capture') and self.video_capture is not None:
+                self.video_capture.release()
+            if not self.headless:
+                cv2.destroyAllWindows()
+            self._running = False
+            print("Video processing thread finished.")
     
     def calculate_angles(self, pixel_x, pixel_y, frame_width, frame_height):
         """Calculate horizontal and vertical angles relative to camera center.
@@ -216,9 +272,18 @@ class DroneDetector:
         return horizontal_angle, -vertical_angle  # Invert vertical angle so positive is up
         
     def stop(self):
+        """Stop the detector thread"""
+        self._running = False
+        # Only join the thread if we're not called from within the thread itself
+        if self._thread and self._thread.is_alive() and self._thread != threading.current_thread():
+            self._thread.join(timeout=2.0)  # Wait for thread to finish with timeout
         if hasattr(self, 'video_capture') and self.video_capture is not None:
             self.video_capture.release()
-        cv2.destroyAllWindows()
+        if not self.headless:
+            try:
+                cv2.destroyAllWindows()
+            except cv2.error:
+                pass  # Ignore OpenCV errors during cleanup
         print("Drone detection stopped.")
 
 

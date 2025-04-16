@@ -1,9 +1,13 @@
 import math
 import asyncio
+import logging
 from starlette.applications import Starlette
 from starlette.endpoints import WebSocketEndpoint
 from starlette.routing import WebSocketRoute
 from starlette.middleware.cors import CORSMiddleware
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # --- Drone Path Generation ---
 def generate_drone_path():
@@ -34,6 +38,7 @@ class DroneWebSocket(WebSocketEndpoint):
 
     async def on_connect(self, websocket):
         await websocket.accept()
+        logging.info("Drone WebSocket client connected")
         self._broadcast_task = asyncio.create_task(self.broadcast_positions(websocket))
 
     async def on_disconnect(self, websocket, close_code):
@@ -55,6 +60,7 @@ class DroneWebSocket(WebSocketEndpoint):
             position = path[index].copy()
             position['speed'] = current_speed
             await websocket.send_json(position)
+            logging.info(f"Drone position sent: {position}")
             # Update speed
             if accelerating:
                 current_speed += acceleration / ticks_per_second
