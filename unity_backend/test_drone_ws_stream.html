@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Drone WebSocket Stream Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        #log {
+            white-space: pre-wrap;
+            background: #eee;
+            padding: 1em;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <h2>Drone WebSocket Stream Test</h2>
+    <div id="log"></div>
+    <script>
+        const logEl = document.getElementById('log');
+        function appendLog(msg) {
+            logEl.innerText += msg + '\n';
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        // Connect to the WebSocket server
+        const ws = new WebSocket('ws://localhost:8000/ws');
+
+        ws.onopen = () => {
+            appendLog('✅ Connected to WebSocket server.');
+        };
+        ws.onclose = () => {
+            appendLog('⚠️ Disconnected from WebSocket server.');
+        };
+        ws.onerror = (e) => {
+            appendLog('❌ WebSocket error: ' + e.message);
+        };
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                appendLog('📡 ' + JSON.stringify(data));
+            } catch (err) {
+                appendLog('❗ Error parsing message: ' + event.data);
+            }
+        };
+    </script>
+</body>
+</html>
