@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import os
 import time
+import math
 import threading
 from detection.sort import Sort
 from detection.unity_stream_capture import ScreenCapture
@@ -247,31 +248,45 @@ class DroneDetector:
             self._running = False
             print("Video processing thread finished.")
     
-    def calculate_angles(self, pixel_x, pixel_y, frame_width, frame_height):
-        """Calculate horizontal and vertical angles relative to camera center.
-        
-        Args:
-            pixel_x: x-coordinate of the point in the image
-            pixel_y: y-coordinate of the point in the image
-            frame_width: width of the frame
-            frame_height: height of the frame
-            
-        Returns:
-            horizontal_angle, vertical_angle: Angles in degrees relative to camera center
+    def calculate_angles(
+            self,
+            pixel_x: float,
+            pixel_y: float,
+            frame_width: int,
+            frame_height: int
+        ) -> tuple[float, float]:
         """
-        # Calculate center of the frame
-        center_x = frame_width // 2
-        center_y = frame_height // 2
-        
-        # Calculate normalized position from -1 to 1 (where 0 is center)
-        norm_x = (pixel_x - center_x) / (frame_width / 2)
-        norm_y = (pixel_y - center_y) / (frame_height / 2)
-        
-        # Calculate angles using the field of view
-        horizontal_angle = norm_x * (self.horizontal_fov / 2)
-        vertical_angle = norm_y * (self.vertical_fov / 2)  # Positive is down from center
-        
-        return horizontal_angle, vertical_angle
+        Return the yaw (horizontal) and pitch (vertical) offsets, in degrees, from the
+        camera’s forward axis that would send a ray through the pixel (pixel_x, pixel_y).
+
+        Args
+        ----
+        pixel_x, pixel_y : coordinates of the point in the image.  The origin (0, 0)
+                        is the **TOP‑LEFT** corner, as in OpenCV / most image APIs.
+        frame_width, frame_height : resolution of the frame in pixels.
+
+        Returns
+        -------
+        (horizontal_angle, vertical_angle) : tuple[float, float]
+            • horizontal_angle  < 0 → pixel lies to the **left** of centre  
+            • vertical_angle    < 0 → pixel lies **below** centre (positive is up)
+        """
+
+        # 1. Normalise pixel to [-1, +1] range centred at the optical axis
+        centre_x = frame_width  * 0.5
+        centre_y = frame_height * 0.5
+        nx = (pixel_x - centre_x) / centre_x      # +right,  -left
+        ny = (centre_y - pixel_y) / centre_y      # +up,     -down   (invert y‑axis)
+
+        # 2. Pre‑compute tangents of half‑FOV (degrees → radians first)
+        tan_h = math.tan(math.radians(self.horizontal_fov) * 0.5)
+        tan_v = math.tan(math.radians(self.vertical_fov)   * 0.5)
+
+        # 3. Exact angles via arctangent
+        yaw_rad   = math.atan(nx * tan_h)   # left/right
+        pitch_rad = math.atan(ny * tan_v)   # up/down
+
+        return math.degrees(yaw_rad), -math.degrees(pitch_rad)
         
     def stop(self):
         """Stop the detector thread"""
