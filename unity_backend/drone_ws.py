@@ -49,9 +49,9 @@ class DroneWebSocket(WebSocketEndpoint):
         path = generate_drone_path()
         ticks_per_second = 30
         path_spacing = 0.1
-        current_speed = 140.0  # m/s
-        max_speed = 160.0
-        min_speed = 140.0
+        current_speed = 600.0  # m/s
+        max_speed = 600.0
+        min_speed = 500.0
         acceleration = 2.0
         accelerating = True
         float_index = 0.0

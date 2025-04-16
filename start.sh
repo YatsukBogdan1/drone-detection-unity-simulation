@@ -10,4 +10,4 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source ~/venvs/yolo-mps/bin/activate
 
 # -------- 2. launch the servers --------
-sudo python "${SCRIPT_DIR}/unity_backend/run_servers.py" "$@"
+python "${SCRIPT_DIR}/unity_backend/run_servers.py" "$@"

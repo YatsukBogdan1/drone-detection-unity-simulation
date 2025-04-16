@@ -6,6 +6,7 @@ import os
 import time
 import threading
 from detection.sort import Sort
+from detection.unity_stream_capture import ScreenCapture
 
 class DroneDetector:
     def __init__(self, model_path=None, video_path=None, confidence=0.4, 
@@ -13,9 +14,10 @@ class DroneDetector:
         if model_path is None:
             # Always resolve relative to this file's directory
             model_path = os.path.join(os.path.dirname(__file__), "weights", "weightsM50Epoch.pt")
-        if video_path is None:
-            # Always resolve relative to this file's directory
-            video_path = os.path.join(os.path.dirname(__file__), "assets", "videos", "drone_video.mp4")
+        # if video_path is None:
+        #     # Always resolve relative to this file's directory
+        #     video_path = os.path.join(os.path.dirname(__file__), "assets", "videos", "drone_video.mp4")
+        #     # video_path = S
         self.window_title = "Drone Detection (MPS)"
         self.headless = headless
         self.video_path = video_path
@@ -69,7 +71,7 @@ class DroneDetector:
         """Process video frames in a separate thread"""
         try:
             # Open video file
-            self.video_capture = cv2.VideoCapture(self.video_path)
+            self.video_capture = ScreenCapture(2)
             if not self.video_capture.isOpened():
                 print(f"Error: Unable to open video file {self.video_path}")
                 return
@@ -269,7 +271,7 @@ class DroneDetector:
         horizontal_angle = norm_x * (self.horizontal_fov / 2)
         vertical_angle = norm_y * (self.vertical_fov / 2)  # Positive is down from center
         
-        return horizontal_angle, -vertical_angle  # Invert vertical angle so positive is up
+        return horizontal_angle, vertical_angle
         
     def stop(self):
         """Stop the detector thread"""
